@@ -1,0 +1,277 @@
+var CEditCalibrationMeasure = (function ($) {
+
+    CEditCalibrationMeasure.tags = {
+        attMeasureTable: "attMeasureTable",
+		seriestypesTime: "seriestypesTime",
+		seriestypesMeasure: "seriestypesMeasure",
+		seriestypesTolMin: "seriestypesTolMin",
+		seriestypesTolMax: "seriestypesTolMax",
+		seriestypesRealDate: "seriestypesRealDate"
+    }
+
+    /**
+     * Constructor for calibration dialog
+     * @param {Object} aSettings - Configuration settings for the dialog
+     * @param {Function} aCallBack - Callback function to execute after operation
+     * @param {Object} aDummyData - Optional dummy data for testing
+     */
+    function CEditCalibrationMeasure(aSettings, aCallBack, aDummyData) {
+        this.idObject = parseInt(aSettings.idsPolysatMachine);
+        this.readTags();
+
+        _Data.readValue(this.idAttMeasureTable, this.idObject).then(function(aResult) {
+			if (!aResult) {
+				_DialogUtils.msgWarning(_("Le tableau des mesures ne doit pas être vide."));
+                return;
+            }
+			
+            this.processData(aResult);
+
+            CQuery.call(this, $.extend(aSettings, {
+                sWdowName: "wdowEditCalibrationMeasures",
+                iWdowWidth: resizeWidth(600),
+                iWdowHeight: resizeHeight(390),
+                bDenyResize: true,
+                bModal: false,
+                bHidePark: false,
+                sHeader: _("Saisir un nouveau point d’étalonnage"),
+                bNewContainer: true,
+                sFilePathHtmlContent: "/temp_resources/models/SpeAraymond/EditCalibrationMeasure/dom/EditCalibrationMeasure.htm",
+                onClose: function () { return this.onCancel(); }.bind(this),
+            }), aCallBack, aDummyData);
+        }.bind(this));
+    }
+
+    /**
+     * Inheritance setup
+     */
+    CEditCalibrationMeasure.prototype = Object.create(CQuery.prototype);
+    CEditCalibrationMeasure.prototype.constructor = CEditCalibrationMeasure;
+
+    $.extend(CEditCalibrationMeasure.prototype, {
+
+        readTags: function () {
+            this.idAttMeasureTable = _Attribute.tagToId(CEditCalibrationMeasure.tags.attMeasureTable);
+			
+			this.idSeriestypesTime = _SeriesType.tagToId(CEditCalibrationMeasure.tags.seriestypesTime);
+			this.idSeriestypesMeasure = _SeriesType.tagToId(CEditCalibrationMeasure.tags.seriestypesMeasure);
+			this.idSeriestypesTolMin = _SeriesType.tagToId(CEditCalibrationMeasure.tags.seriestypesTolMin);
+			this.idSeriestypesTolMax = _SeriesType.tagToId(CEditCalibrationMeasure.tags.seriestypesTolMax);
+			this.idSeriestypesRealDate = _SeriesType.tagToId(CEditCalibrationMeasure.tags.seriestypesRealDate);			
+        },
+
+        /**
+         * Processes measurement data and extracts last values from each series
+         * @param {Object} aResult - Raw measurement data from server containing series and values
+         */
+        processData: function (aResult) {
+            this.originalData = aResult;
+            if (!aResult || !aResult.Series || aResult.Series.length === 0 || aResult.Series.every(s => !s.Values || s.Values.length === 0)) {
+                this.lastMeasure = null;
+                this.lastMinTol = null;
+                this.lastMaxTol = null;
+                this.lastDate = null;
+                return;
+            }
+
+            var measureSeries = aResult.Series.find(s => s.SeriesTypes && (s.SeriesTypes.sRawName === "Measure" || s.SeriesTypes.sName === "Mesure" || s.SeriesTypes.Tags[0] === "seriestypesMeasure"));
+            var minTolSeries = aResult.Series.find(s => s.SeriesTypes && (s.SeriesTypes.sName === "Tol - Min" || s.SeriesTypes.Tags[0] === "seriestypesTolMin"));
+            var maxTolSeries = aResult.Series.find(s => s.SeriesTypes && (s.SeriesTypes.sName === "Tol - Max" || s.SeriesTypes.Tags[0] === "seriestypesTolMax"));
+            var dateSeries = aResult.Series.find(s => s.SeriesTypes && (s.SeriesTypes.sRawName === "Real Date" || s.SeriesTypes.sName === "Date réelle" || s.SeriesTypes.sName === "Real Date" || s.SeriesTypes.Tags[0] === "seriestypesRealDate"));
+
+
+            if (measureSeries && measureSeries.Values && measureSeries.Values.length > 0) {
+                this.lastMeasure = measureSeries.Values[measureSeries.Values.length - 1].sName;
+            }
+            if (minTolSeries && minTolSeries.Values && minTolSeries.Values.length > 0) {
+                this.lastMinTol = minTolSeries.Values[minTolSeries.Values.length - 1].sName;
+            }
+            if (maxTolSeries && maxTolSeries.Values && maxTolSeries.Values.length > 0) {
+                this.lastMaxTol = maxTolSeries.Values[maxTolSeries.Values.length - 1].sName;
+            }
+            if (dateSeries && dateSeries.Values && dateSeries.Values.length > 0) {
+                var dateStr = dateSeries.Values[dateSeries.Values.length - 1].sName;
+                var parts = dateStr.split('/');
+                if (parts.length === 3) {
+                    this.lastDate = `${parts[2]}-${parts[1]}-${parts[0]}`;
+                }
+            }
+        },
+
+        /**
+         * Handles dialog close event and triggers callback with object update
+         * @param {Object} aSettings - Settings passed during close event
+         * @returns {*} Result of callback function execution
+         */
+        onClose: function (aSettings) {
+            if (this.callback)
+                return this.callback({updateObject: {ID: parseInt(this.idObject)}}, this.dummyData);
+        },
+
+        /**
+         * Populates form fields with previous measurement data and current date
+         * @returns {boolean} True if at least one field was successfully populated
+         */
+        onWindowReady: function () {
+            var allInputs = document.querySelectorAll('input');
+            for (var i = 0; i < allInputs.length; i++) {
+                var input = allInputs[i];
+                var inputId = input.id.toLowerCase();
+
+                if (inputId.includes('prevmeasure') && this.lastMeasure) {
+                    input.value = this.lastMeasure;
+                } else if (inputId.includes('prevtolmin') && this.lastMinTol) {
+                    input.value = this.lastMinTol;
+                } else if (inputId.includes('prevtolmax') && this.lastMaxTol) {
+                    input.value = this.lastMaxTol;
+                } else if (inputId.includes('prevrealdate') && this.lastDate) {
+                    input.value = this.lastDate;
+                }
+
+                if (inputId.includes('newrealdate')) {
+                    const today = new Date();
+                    const year = today.getFullYear();
+                    const month = String(today.getMonth() + 1).padStart(2, '0');
+                    const day = String(today.getDate()).padStart(2, '0');
+                    input.value = `${year}-${month}-${day}`;
+                }
+            }
+        },
+
+        /**
+         * Validates input data, saves new calibration point, and closes dialog
+         * Collects form data, updates measurement series, and writes to server
+         * @returns {boolean} True if validation and save were successful
+         */
+        onValidate: function () {
+            var measureInput = $('input[id^="newMeasure"]');
+            var realDateInput = $('input[id^="newRealDate"]');
+
+            var measureValue = measureInput.length ? measureInput.val() : '';
+            var realDateValue = realDateInput.length ? realDateInput.val() : '';
+
+            if (!measureValue || !realDateValue) {
+                _DialogUtils.msgWarning(_('Les champs "Mesure" et "Date réelle" sont obligatoires.'));
+                return false;
+            }
+
+            var tolMinInput = $('input[id^="prevTolMin"]');
+            var tolMaxInput = $('input[id^="prevTolMax"]');
+
+            this.newCalibrationData = {
+                measure: measureValue,
+                realDate: realDateValue,
+                tolMin: tolMinInput.length ? tolMinInput.val() : '',
+                tolMax: tolMaxInput.length ? tolMaxInput.val() : ''
+            };
+
+            var updatedData = this.updateDataAfterValidation();
+            if (updatedData) {
+                _Data.writeTableData(this.idAttMeasureTable, parseInt(this.idObject), updatedData.Series).then(function (response) {
+                });
+            }
+
+            if (CQuery.prototype.onValidate) {
+                return CQuery.prototype.onValidate.call(this);
+            }
+
+            return true;
+        },
+
+        /**
+         * Adds a new entry to a specific series
+         * @param {Object} newData - Data structure containing all series
+         * @param {number} seriesTypeId - ID of the series type to update
+         * @param {number} maxId - Current maximum ID (will be incremented)
+         * @param {string} value - Value to add
+         * @param {string} valueType - Type of value (tvtNumerical, tvtUndefined, etc.)
+         * @param {string} defaultValue - Default value if `value` is empty (optional)
+         * @returns {number} New ID after incrementation
+         */
+        addValueToSeries: function(newData, seriesTypeId, maxId, value, valueType, defaultValue) {
+            var series = newData.Series.find(s => s.SeriesTypes && s.SeriesTypes.ID === seriesTypeId);
+            
+            if (!series) {
+                return maxId;
+            }
+            
+            var finalValue = value || defaultValue || "0";
+            
+            series.Values.push({
+                "ID": ++maxId,
+                "sName": finalValue,
+                "sType": valueType
+            });
+            
+            return maxId;
+        },
+
+        /**
+         * Updates measurement data structure with new calibration values
+         * FIX: Implement logic to harmonize the length of the series.
+         * @returns {Object|undefined} Updated data structure ready for server save, or undefined if invalid data
+         */
+        updateDataAfterValidation: function () {
+            if (!this.originalData || !this.newCalibrationData) {
+                return;
+            }
+            var newData = JSON.parse(JSON.stringify(this.originalData));
+            var newValues = this.newCalibrationData;
+
+            var maxId = 0;
+            var maxLength = 0;
+            
+            newData.Series.forEach(function (series) {
+                if (series.Values) {
+                    if (series.Values.length > maxLength) {
+                        maxLength = series.Values.length;
+                    }
+                    series.Values.forEach(function (value) {
+                        if (value.ID > maxId) maxId = value.ID;
+                    });
+                }
+            });
+
+            newData.Series.forEach(function (series) {
+                if (!series.Values) series.Values = [];
+
+                var fillValue = ""; 
+                var sType = "tvtUndefined"; 
+                
+                if (series.SeriesTypes && series.SeriesTypes.sType === "sttNumerical") {
+                    fillValue = "0"; 
+                    sType = "tvtNumerical";
+                }
+
+                for (var i = series.Values.length; i < maxLength; i++) {
+                    series.Values.push({
+                        "ID": ++maxId,
+                        "sName": fillValue,
+                        "sType": sType
+                    });
+                }
+            });
+
+            var formattedDate = newValues.realDate;
+            if (formattedDate && formattedDate.includes('-')) {
+                var parts = formattedDate.split('-');
+                if (parts.length === 3) {
+                    formattedDate = parts[2] + '/' + parts[1] + '/' + parts[0]; 
+                }
+            }
+            
+            var nextTimeValue = (maxLength + 1).toString(); 	
+			
+            maxId = this.addValueToSeries(newData, this.idSeriestypesTime, maxId, nextTimeValue, "tvtNumerical");
+            maxId = this.addValueToSeries(newData, this.idSeriestypesMeasure, maxId, newValues.measure, "tvtNumerical");
+            maxId = this.addValueToSeries(newData, this.idSeriestypesTolMin, maxId, newValues.tolMin, "tvtNumerical", "0");
+            maxId = this.addValueToSeries(newData, this.idSeriestypesTolMax, maxId, newValues.tolMax, "tvtNumerical", "0");
+            maxId = this.addValueToSeries(newData, this.idSeriestypesRealDate, maxId, formattedDate, "tvtUndefined");
+
+            this.updatedData = newData;
+            return newData;
+        }
+    });
+
+    return CEditCalibrationMeasure;
+})(jQuery);
